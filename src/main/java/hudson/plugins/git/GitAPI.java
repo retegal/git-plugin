@@ -80,6 +80,18 @@ public class GitAPI implements IGitAPI {
         }
     }
 
+
+    public void addRemote(final RemoteConfig remoteConfig, final String remoteName) throws GitException {
+
+        try {
+            final String source = remoteConfig.getURIs().get(0).toString();
+            String result = launchCommand("remote", "add", remoteName, source);
+        } catch (Exception e) {
+            e.printStackTrace(listener.error("Failed to add remote to repo"));
+            throw new GitException("Failed to add remote to repo", e);
+        }
+    }
+
     public boolean hasGitRepo() throws GitException {
         try {
 
@@ -118,7 +130,7 @@ public class GitAPI implements IGitAPI {
                                      + (repository != null ? " from " + repository : ""));
 
         ArgumentListBuilder args = new ArgumentListBuilder();
-        args.add("fetch", "-t");
+        args.add("fetch", "-t", "--verbose", "--progress");
 
         if (repository != null) {
             args.add(repository);

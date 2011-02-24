@@ -99,6 +99,8 @@ public class GitSCM extends SCM implements Serializable {
 
     private boolean pruneBranches;
     
+    private boolean fetchInsteadOfClone;
+    
     /**
      * @deprecated
      *      Replaced by {@link #buildChooser} instead.
@@ -147,7 +149,7 @@ public class GitSCM extends SCM implements Serializable {
                 Collections.singletonList(new BranchSpec("")),
                 new PreBuildMergeOptions(), false, Collections.<SubmoduleConfig>emptyList(), 
                 false, new DefaultBuildChooser(), null, null, false, null,
-                null, null, null, false, false, null, null, false);
+                null, null, null, false, false, null, null, false, false);
     }
 
     @DataBoundConstructor
@@ -169,7 +171,8 @@ public class GitSCM extends SCM implements Serializable {
                   boolean pruneBranches,
                   String gitConfigName,
                   String gitConfigEmail,
-                  boolean skipTag) {
+                  boolean skipTag,
+                  boolean fetchInsteadOfClone) {
 
         // normalization
         this.branches = branches;
@@ -193,7 +196,7 @@ public class GitSCM extends SCM implements Serializable {
         this.excludedUsers = excludedUsers;
         this.recursiveSubmodules = recursiveSubmodules;
         this.pruneBranches = pruneBranches;
-        this.gitConfigName = gitConfigName;
+        this.fetchInsteadOfClone = fetchInsteadOfClone;        this.gitConfigName = gitConfigName;
         this.gitConfigEmail = gitConfigEmail;
         this.skipTag = skipTag;
         buildChooser.gitSCM = this; // set the owner
@@ -301,6 +304,10 @@ public class GitSCM extends SCM implements Serializable {
     @Override
     public GitRepositoryBrowser getBrowser() {
         return browser;
+    }
+    
+    public boolean getFetchInsteadOfClone() {
+    	return this.fetchInsteadOfClone;
     }
 
     public String getGitConfigName() {
@@ -771,6 +778,7 @@ public class GitSCM extends SCM implements Serializable {
 
         final RevisionParameterAction rpa = build.getAction(RevisionParameterAction.class);
 
+        listener.getLogger().println("calling revToBuild");
         final Revision revToBuild = workingDirectory.act(new FileCallable<Revision>() {
                 private static final long serialVersionUID = 1L;
                 public Revision invoke(File localWorkspace, VirtualChannel channel)
@@ -806,32 +814,57 @@ public class GitSCM extends SCM implements Serializable {
                         }
 
                     } else {
-                        
-                        listener.getLogger().println("Cloning the remote Git repository");
+                    	
+	                        listener.getLogger().println("Cloning the remote Git repository");
+	
+	                        // Go through the repositories, trying to clone from one
+	                        //
+	                        boolean successfullyCloned = false;
+	                        for(RemoteConfig rc : paramRepos) {
+	                
 
-                        // Go through the repositories, trying to clone from one
-                        //
-                        boolean successfullyCloned = false;
-                        for(RemoteConfig rc : paramRepos) {
-                            try {
-                                git.clone(rc);
-                                successfullyCloned = true;
-                                break;
-                            }
-                            catch(GitException ex) {
-                                listener.error("Error cloning remote repo '%s' : %s", rc.getName(), ex.getMessage());
-                                if(ex.getCause() != null) {
-                                    listener.error("Cause: %s", ex.getCause().getMessage());
+                    	            if( fetchInsteadOfClone ) {
+                    		        listener.getLogger().println("Fetch prefered over clone...");
+                              		listener.getLogger().println("Initing en empty repository.");
+                    		        try {
+                                            // Init the empty repo
+                    			    git.init();
+
+                                            // Add a remote for future use.
+                                            git.addRemote(rc, "origin");
+                                            successfullyCloned = true;
+                                        
+                    		        }  
+                              		catch(GitException ex){
+                       			    listener.error("Error init'ing and empty repo: %s", ex.getMessage());
+                                            if(ex.getCause() != null) {
+                                                listener.error("Cause: %s", ex.getCause().getMessage());
+                                                throw new GitException("Could not init empty repository");
+                                            }
+                    		        }
+                    	            }
+                                    else {
+                                        listener.getLogger().println("Cloneing repostor."); // todo put this back to the same text as before
+                                        try {
+	                                    git.clone(rc);
+	                                    successfullyCloned = true;
+	                                    break;
+                                        }
+	                                catch(GitException ex) {
+	                                    listener.error("Error cloning remote repo '%s' : %s", rc.getName(), ex.getMessage());
+	                                    if(ex.getCause() != null) {
+	                                        listener.error("Cause: %s", ex.getCause().getMessage());
+	                                }
+	                            }
+
+	                            listener.getLogger().println("Trying next repository");
+	                            }
                                 }
-                                // Failed. Try the next one
-                                listener.getLogger().println("Trying next repository");
-                            }
-                        }
-
-                        if(!successfullyCloned) {
-                            listener.error("Could not clone repository");
-                            throw new GitException("Could not clone");
-                        }
+	
+	                        if(!successfullyCloned) {
+	                            listener.error("Could not clone repository");
+	                            throw new GitException("Could not clone");
+	                        }
 
                         boolean fetched = false;
                         
@@ -890,8 +923,8 @@ public class GitSCM extends SCM implements Serializable {
         if(revToBuild == null) {
             // getBuildCandidates should make the last item the last build, so a re-build
             // will build the last built thing.
-            listener.error("Nothing to do");
-            return false;
+            //listener.error("Nothing to do");
+            //return false;
         }
         listener.getLogger().println("Commencing build of " + revToBuild);
         environment.put(GIT_COMMIT, revToBuild.getSha1String());
@@ -1217,7 +1250,8 @@ public class GitSCM extends SCM implements Serializable {
                               req.getParameter("git.pruneBranches") != null,
                               req.getParameter("git.gitConfigName"),
                               req.getParameter("git.gitConfigEmail"),
-                              req.getParameter("git.skipTag") != null);
+                              req.getParameter("git.skipTag") != null,
+                              req.getParameter("git.fetchInsteadOfClone") != null);
         }
         
         /**
